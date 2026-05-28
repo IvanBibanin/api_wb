@@ -1,7 +1,7 @@
 # api_wb
 
-Простой Python-клиент для обработки отчета Wildberries **Внешний трафик** и
-получения статистики по UTM-меткам в `pandas.DataFrame`.
+Python-клиент для скачивания отчета Wildberries **Внешний трафик** и получения
+статистики по UTM-меткам в `pandas.DataFrame`.
 
 ## Установка
 
@@ -13,23 +13,42 @@ pip install -e .
 
 - `pandas`
 - `openpyxl`
+- `requests`
 
 ## Использование
+
+Класс сам скачивает XLS-отчет из WB. Для доступа нужна cookie авторизованной
+сессии `cmp.wildberries.ru`.
 
 ```python
 from wb_utm_statistics import WildberriesUTMStatsClient
 
-client = WildberriesUTMStatsClient()
+cookie = "сюда_вставить_cookie_из_браузера"
 
-data = client.get_utm_statistics("/Users/ivan/Downloads/Внешний трафик.xlsx")
+client = WildberriesUTMStatsClient(cookie=cookie)
+
+data = client.get_utm_statistics(
+    begin_date="2026-04-28",
+    end_date="2026-05-28",
+)
+
 df = client.to_dataframe(data)
-
 print(df.head())
 ```
 
-## Сводка по UTM
+## Сохранить XLS
 
-Чтобы получить агрегированную статистику по UTM-меткам:
+```python
+path = client.download_utm_report(
+    begin_date="2026-04-28",
+    end_date="2026-05-28",
+    save_path="/Users/ivan/Downloads/Внешний трафик.xlsx",
+)
+
+print(path)
+```
+
+## Сводка по UTM
 
 ```python
 utm_df = client.to_dataframe(data, group_by_utm=True)
@@ -50,7 +69,19 @@ print(utm_df.head())
 - `Конверсия в заказ (%)`
 - `Средний заказ (руб)`
 
-## Ошибки
+## Endpoint
 
-Если файл не найден, имеет неверный формат или в отчете нет нужных колонок,
-клиент выбрасывает `WildberriesReportError`.
+Кнопка `Скачать в XLS` на странице `https://cmp.wildberries.ru/external-traffic`
+вызывает:
+
+```text
+GET https://cmp.wildberries.ru/api/v5/events-external-traffic/xls
+```
+
+Параметры:
+
+- `beginDate`
+- `endDate`
+
+Если WB возвращает `401` или `403`, значит cookie не передана или сессия
+истекла.
