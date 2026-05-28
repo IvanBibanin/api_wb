@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
+from io import BytesIO, StringIO
+from typing import Any, Mapping
 
 import pandas as pd
+import requests
 
 
 class WildberriesReportError(Exception):
@@ -30,34 +31,36 @@ class WildberriesUTMStatsClient:
         "Платформа",
     ]
 
-    def __init__(self, token: str | None = None) -> None:
+    def __init__(self, token: str | None = None, timeout: int = 60) -> None:
         self.token = token
+        self.timeout = timeout
 
     def get_utm_statistics(
         self,
-        report_path: str | Path,
-        sheet_name: str = "События",
-    ) -> list[dict[str, Any]]:
-        """Читает Excel-отчет WB 'Внешний трафик' и возвращает список строк."""
+        url: str,
+        params: Mapping[str, Any] | None = None,
+        headers: Mapping[str, str] | None = None,
+    ) -> requests.Response:
+        """Получает ответ сервера с отчетом WB 'Внешний трафик'."""
 
-        path = Path(report_path).expanduser()
-        self._handle_file_errors(path)
-
-        try:
-            df = pd.read_excel(path, sheet_name=sheet_name)
-        except Exception as error:
-            raise WildberriesReportError(f"Не удалось прочитать Excel-отчет: {error}")
-
-        return df.to_dict("records")
+        response = requests.get(
+            url,
+            params=params,
+            headers=self._make_headers(headers),
+            timeout=self.timeout,
+        )
+        self._handle_response_errors(response)
+        return response
 
     def to_dataframe(
         self,
-        data: list[dict[str, Any]],
+        response_or_data: requests.Response | bytes | list[dict[str, Any]] | dict[str, Any],
         group_by_utm: bool = False,
+        sheet_name: str = "События",
     ) -> pd.DataFrame:
-        """Преобразует строки отчета в DataFrame и считает базовые метрики."""
+        """Преобразует ответ сервера в DataFrame и считает базовые метрики."""
 
-        df = pd.DataFrame(data)
+        df = self._read_dataframe(response_or_data, sheet_name=sheet_name)
         if df.empty:
             return df
 
@@ -86,11 +89,85 @@ class WildberriesUTMStatsClient:
 
         return self._add_calculated_columns(df)
 
-    def _handle_file_errors(self, path: Path) -> None:
-        if not path.exists():
-            raise WildberriesReportError(f"Файл не найден: {path}")
-        if path.suffix.lower() not in {".xlsx", ".xls"}:
-            raise WildberriesReportError("Нужен Excel-файл .xlsx или .xls")
+    def _make_headers(
+        self,
+        headers: Mapping[str, str] | None,
+    ) -> dict[str, str]:
+        result = dict(headers or {})
+        if self.token:
+            result.setdefault("Authorization", self.token)
+        return result
+
+    def _handle_response_errors(self, response: requests.Response) -> None:
+        if response.ok:
+            return
+
+        try:
+            error_text = response.json()
+        except ValueError:
+            error_text = response.text
+
+        raise WildberriesReportError(
+            f"WB server error {response.status_code}: {error_text}"
+        )
+
+    def _read_dataframe(
+        self,
+        response_or_data: requests.Response | bytes | list[dict[str, Any]] | dict[str, Any],
+        sheet_name: str,
+    ) -> pd.DataFrame:
+        if isinstance(response_or_data, requests.Response):
+            return self._read_response(response_or_data, sheet_name)
+        if isinstance(response_or_data, bytes):
+            return self._read_bytes(response_or_data, sheet_name)
+        if isinstance(response_or_data, list):
+            return pd.DataFrame(response_or_data)
+        if isinstance(response_or_data, dict):
+            return self._read_json_payload(response_or_data)
+
+        raise WildberriesReportError(
+            "Нужно передать requests.Response, bytes, list[dict] или dict"
+        )
+
+    def _read_response(
+        self,
+        response: requests.Response,
+        sheet_name: str,
+    ) -> pd.DataFrame:
+        content_type = response.headers.get("Content-Type", "").lower()
+
+        if "json" in content_type:
+            return self._read_json_payload(response.json())
+        if "csv" in content_type or "text/plain" in content_type:
+            return pd.read_csv(StringIO(response.text))
+
+        try:
+            return self._read_bytes(response.content, sheet_name)
+        except Exception as excel_error:
+            try:
+                return self._read_json_payload(response.json())
+            except ValueError:
+                raise WildberriesReportError(
+                    f"Не удалось разобрать ответ сервера: {excel_error}"
+                )
+
+    def _read_bytes(self, content: bytes, sheet_name: str) -> pd.DataFrame:
+        try:
+            return pd.read_excel(BytesIO(content), sheet_name=sheet_name)
+        except Exception:
+            return pd.read_csv(BytesIO(content))
+
+    def _read_json_payload(self, payload: Any) -> pd.DataFrame:
+        if isinstance(payload, list):
+            return pd.DataFrame(payload)
+        if isinstance(payload, dict):
+            for key in ("data", "result", "rows", "events", "items"):
+                value = payload.get(key)
+                if isinstance(value, list):
+                    return pd.DataFrame(value)
+            return pd.DataFrame([payload])
+
+        raise WildberriesReportError("JSON-ответ должен быть списком или словарем")
 
     def _add_calculated_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         clicks = df["Переходы"].astype(float)
