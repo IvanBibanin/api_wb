@@ -44,6 +44,27 @@ class WildberriesUTMStatsClient:
         params: Mapping[str, Any] | None = None,
         headers: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
+        sheet_name: str = "События",
+    ) -> list[dict[str, Any]]:
+        """Получает XLS-отчет WB в память и возвращает список строк."""
+
+        response = self.get_utm_response(
+            begin_date=begin_date,
+            end_date=end_date,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+        )
+        df = self._read_response(response, sheet_name=sheet_name)
+        return df.to_dict("records")
+
+    def get_utm_response(
+        self,
+        begin_date: str | date | datetime,
+        end_date: str | date | datetime,
+        params: Mapping[str, Any] | None = None,
+        headers: Mapping[str, str] | None = None,
+        cookies: Mapping[str, str] | None = None,
     ) -> requests.Response:
         """Получает ответ сервера с отчетом WB 'Внешний трафик'."""
 

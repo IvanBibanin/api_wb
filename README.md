@@ -25,7 +25,7 @@ from wb_utm_statistics import WildberriesUTMStatsClient
 
 client = WildberriesUTMStatsClient()
 
-response = client.get_utm_statistics(
+data = client.get_utm_statistics(
     begin_date="2026-04-28",
     end_date="2026-05-28",
     cookies={
@@ -33,7 +33,7 @@ response = client.get_utm_statistics(
     },
 )
 
-df = client.to_dataframe(response)
+df = client.to_dataframe(data)
 print(df.head())
 ```
 
@@ -42,7 +42,7 @@ print(df.head())
 Чтобы получить агрегированную статистику по UTM-меткам:
 
 ```python
-utm_df = client.to_dataframe(response, group_by_utm=True)
+utm_df = client.to_dataframe(data, group_by_utm=True)
 
 print(utm_df.head())
 ```
@@ -76,6 +76,9 @@ GET https://cmp.wildberries.ru/api/v5/events-external-traffic/xls
 
 Этот endpoint требует авторизованную сессию кабинета WB. Обычный WB API-токен
 может не подойти, потому что метод не описан как публичный WB API endpoint.
+
+Файл не сохраняется на диск. XLS-ответ сервера читается из оперативной памяти
+через `io.BytesIO`.
 
 ## Ошибки
 
