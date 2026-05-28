@@ -1,83 +1,110 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import requests
 
 
-class WildberriesAPIError(Exception):
+class WildberriesReportError(Exception):
     pass
 
 
-class WildberriesStatsClient:
-    SALES_URL = "https://statistics-api.wildberries.ru/api/v1/supplier/sales"
+class WildberriesUTMStatsClient:
+    UTM_COLUMNS = [
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_term",
+        "utm_content",
+    ]
+    METRIC_COLUMNS = [
+        "Переходы",
+        "Заказанные товары",
+        "Стоимость заказов (руб)",
+    ]
+    REQUIRED_COLUMNS = [
+        "Дата",
+        *UTM_COLUMNS,
+        *METRIC_COLUMNS,
+        "Платформа",
+    ]
 
-    def __init__(self, token: str, timeout: int = 30) -> None:
+    def __init__(self, token: str | None = None) -> None:
         self.token = token
-        self.timeout = timeout
 
-    def get_sales_statistics(
+    def get_utm_statistics(
         self,
-        date_from: str | date | datetime,
-        flag: int = 0,
+        report_path: str | Path,
+        sheet_name: str = "События",
     ) -> list[dict[str, Any]]:
-        """
-        Получает статистику продаж WB.
+        """Читает Excel-отчет WB 'Внешний трафик' и возвращает список строк."""
 
-        date_from:
-            - '2026-05-01' или '2026-05-01T00:00:00'
-        flag:
-            - 0: данные, измененные с date_from
-            - 1: все данные за указанную дату
-        """
+        path = Path(report_path).expanduser()
+        self._handle_file_errors(path)
 
-        response = requests.get(
-            self.SALES_URL,
-            headers={"Authorization": self.token},
-            params={
-                "dateFrom": self._format_date(date_from),
-                "flag": flag,
-            },
-            timeout=self.timeout,
-        )
-        self._handle_response_errors(response)
-        return response.json()
+        try:
+            df = pd.read_excel(path, sheet_name=sheet_name)
+        except Exception as error:
+            raise WildberriesReportError(f"Не удалось прочитать Excel-отчет: {error}")
 
-    def to_dataframe(self, data: list[dict[str, Any]]) -> pd.DataFrame:
-        """Преобразует ответ WB API в pandas DataFrame."""
+        return df.to_dict("records")
+
+    def to_dataframe(
+        self,
+        data: list[dict[str, Any]],
+        group_by_utm: bool = False,
+    ) -> pd.DataFrame:
+        """Преобразует строки отчета в DataFrame и считает базовые метрики."""
 
         df = pd.DataFrame(data)
         if df.empty:
             return df
 
-        for column in ("date", "lastChangeDate", "cancelDate"):
-            if column in df.columns:
-                df[column] = pd.to_datetime(df[column], errors="coerce")
+        missing_columns = [
+            column for column in self.REQUIRED_COLUMNS if column not in df.columns
+        ]
+        if missing_columns:
+            raise WildberriesReportError(
+                f"В отчете нет нужных колонок: {missing_columns}"
+            )
 
-        if "saleID" in df.columns:
-            df["is_return"] = df["saleID"].astype(str).str.startswith("R")
+        df["Дата"] = pd.to_datetime(df["Дата"], errors="coerce")
+
+        for column in self.METRIC_COLUMNS:
+            df[column] = pd.to_numeric(df[column], errors="coerce").fillna(0)
+
+        if group_by_utm:
+            df = (
+                df.groupby(self.UTM_COLUMNS, dropna=False, as_index=False)[
+                    self.METRIC_COLUMNS
+                ]
+                .sum()
+                .sort_values("Переходы", ascending=False)
+                .reset_index(drop=True)
+            )
+
+        return self._add_calculated_columns(df)
+
+    def _handle_file_errors(self, path: Path) -> None:
+        if not path.exists():
+            raise WildberriesReportError(f"Файл не найден: {path}")
+        if path.suffix.lower() not in {".xlsx", ".xls"}:
+            raise WildberriesReportError("Нужен Excel-файл .xlsx или .xls")
+
+    def _add_calculated_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        clicks = df["Переходы"].astype(float)
+        orders = df["Заказанные товары"].astype(float)
+        amount = df["Стоимость заказов (руб)"].astype(float)
+
+        df["Конверсия в заказ (%)"] = (
+            orders.div(clicks.where(clicks != 0)).mul(100).fillna(0).round(2)
+        )
+        df["Средний заказ (руб)"] = (
+            amount.div(orders.where(orders != 0)).fillna(0).round(2)
+        )
 
         return df
 
-    def _handle_response_errors(self, response: requests.Response) -> None:
-        if response.ok:
-            return
 
-        try:
-            error_text = response.json()
-        except ValueError:
-            error_text = response.text
-
-        raise WildberriesAPIError(
-            f"WB API error {response.status_code}: {error_text}"
-        )
-
-    @staticmethod
-    def _format_date(value: str | date | datetime) -> str:
-        if isinstance(value, datetime):
-            return value.isoformat(timespec="seconds")
-        if isinstance(value, date):
-            return value.isoformat()
-        return value
+WildberriesStatsClient = WildberriesUTMStatsClient

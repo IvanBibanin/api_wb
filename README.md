@@ -1,7 +1,7 @@
 # api_wb
 
-Простой Python-клиент для получения статистики продаж Wildberries через API и
-перевода ответа в `pandas.DataFrame`.
+Простой Python-клиент для обработки отчета Wildberries **Внешний трафик** и
+получения статистики по UTM-меткам в `pandas.DataFrame`.
 
 ## Установка
 
@@ -11,36 +11,46 @@ pip install -e .
 
 ## Зависимости
 
-- `requests`
 - `pandas`
+- `openpyxl`
 
 ## Использование
 
 ```python
-from wb_utm_statistics import WildberriesStatsClient
+from wb_utm_statistics import WildberriesUTMStatsClient
 
-client = WildberriesStatsClient(token="ТВОЙ_WB_API_ТОКЕН")
+client = WildberriesUTMStatsClient()
 
-data = client.get_sales_statistics(
-    date_from="2026-05-01",
-    flag=1,
-)
-
+data = client.get_utm_statistics("/Users/ivan/Downloads/Внешний трафик.xlsx")
 df = client.to_dataframe(data)
+
 print(df.head())
 ```
 
-## Параметры
+## Сводка по UTM
 
-`date_from` — дата начала выгрузки. Можно передать строку, `date` или
-`datetime`.
+Чтобы получить агрегированную статистику по UTM-меткам:
 
-`flag`:
+```python
+utm_df = client.to_dataframe(data, group_by_utm=True)
 
-- `0` — получить данные, измененные с `date_from`;
-- `1` — получить все данные за указанную дату.
+print(utm_df.head())
+```
 
-## Ошибки API
+В сводку входят:
 
-Если Wildberries API возвращает ошибку, клиент выбрасывает
-`WildberriesAPIError` с кодом ответа и текстом ошибки.
+- `utm_source`
+- `utm_medium`
+- `utm_campaign`
+- `utm_term`
+- `utm_content`
+- `Переходы`
+- `Заказанные товары`
+- `Стоимость заказов (руб)`
+- `Конверсия в заказ (%)`
+- `Средний заказ (руб)`
+
+## Ошибки
+
+Если файл не найден, имеет неверный формат или в отчете нет нужных колонок,
+клиент выбрасывает `WildberriesReportError`.
