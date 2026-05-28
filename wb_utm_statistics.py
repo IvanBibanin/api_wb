@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import BytesIO, StringIO
+from datetime import date, datetime
 from typing import Any, Mapping
 
 import pandas as pd
@@ -12,6 +13,7 @@ class WildberriesReportError(Exception):
 
 
 class WildberriesUTMStatsClient:
+    UTM_REPORT_URL = "https://cmp.wildberries.ru/api/v5/events-external-traffic/xls"
     UTM_COLUMNS = [
         "utm_source",
         "utm_medium",
@@ -37,18 +39,31 @@ class WildberriesUTMStatsClient:
 
     def get_utm_statistics(
         self,
-        url: str,
+        begin_date: str | date | datetime,
+        end_date: str | date | datetime,
         params: Mapping[str, Any] | None = None,
         headers: Mapping[str, str] | None = None,
+        cookies: Mapping[str, str] | None = None,
     ) -> requests.Response:
         """Получает ответ сервера с отчетом WB 'Внешний трафик'."""
 
-        response = requests.get(
-            url,
-            params=params,
-            headers=self._make_headers(headers),
-            timeout=self.timeout,
-        )
+        request_params = {
+            "beginDate": self._format_date(begin_date),
+            "endDate": self._format_date(end_date),
+        }
+        request_params.update(params or {})
+
+        try:
+            response = requests.get(
+                self.UTM_REPORT_URL,
+                params=request_params,
+                headers=self._make_headers(headers),
+                cookies=cookies,
+                timeout=self.timeout,
+            )
+        except requests.RequestException as error:
+            raise WildberriesReportError(f"Не удалось получить отчет WB: {error}")
+
         self._handle_response_errors(response)
         return response
 
@@ -97,6 +112,14 @@ class WildberriesUTMStatsClient:
         if self.token:
             result.setdefault("Authorization", self.token)
         return result
+
+    @staticmethod
+    def _format_date(value: str | date | datetime) -> str:
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        if isinstance(value, date):
+            return value.isoformat()
+        return value
 
     def _handle_response_errors(self, response: requests.Response) -> None:
         if response.ok:

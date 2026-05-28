@@ -23,10 +23,14 @@ pip install -e .
 ```python
 from wb_utm_statistics import WildberriesUTMStatsClient
 
-client = WildberriesUTMStatsClient(token="ТВОЙ_ТОКЕН")
+client = WildberriesUTMStatsClient()
 
 response = client.get_utm_statistics(
-    url="URL_ОТЧЕТА_ВНЕШНИЙ_ТРАФИК",
+    begin_date="2026-04-28",
+    end_date="2026-05-28",
+    cookies={
+        # cookies авторизованной сессии cmp.wildberries.ru
+    },
 )
 
 df = client.to_dataframe(response)
@@ -58,9 +62,20 @@ print(utm_df.head())
 
 ## Важно
 
-В публичной документации WB API нет отдельного официального метода для отчета
-`Внешний трафик` по UTM. Поэтому в `url` нужно передать адрес серверной выгрузки,
-если он доступен в кабинете или во внутреннем сервисе.
+Кнопка `Скачать в XLS` на странице `https://cmp.wildberries.ru/external-traffic`
+вызывает endpoint:
+
+```text
+GET https://cmp.wildberries.ru/api/v5/events-external-traffic/xls
+```
+
+Параметры:
+
+- `beginDate`
+- `endDate`
+
+Этот endpoint требует авторизованную сессию кабинета WB. Обычный WB API-токен
+может не подойти, потому что метод не описан как публичный WB API endpoint.
 
 ## Ошибки
 
