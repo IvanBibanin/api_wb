@@ -30,9 +30,6 @@ class WildberriesUTMStatsClient:
         "Платформа",
     ]
 
-    def __init__(self, token: str | None = None) -> None:
-        self.token = token
-
     def get_utm_statistics(
         self,
         report_path: str | Path,
